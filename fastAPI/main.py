@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import joblib
-import numpy as np
+import pickle
+import pandas as pd
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -14,36 +14,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load model and label encoder
-model = joblib.load('crop_yield_model.pkl')
-encoder = joblib.load('label_encoder.pkl')
+# Load the trained pipeline model
+with open('rf_yield_model_pipeline.pkl', 'rb') as f:
+    model = pickle.load(f)
 
-# Define request model
-class PredictionInput(BaseModel):
-    year: int
-    production: float
-    area: float
-    crop: str
-    mintemp: float
-    maxtemp: float
-    rainfall: float
-
-@app.get("/")
-def read_root():
-    return {"message": "Crop Yield Prediction API is up and running!"}
+# Define the expected input schema matching your training feature names
+class Features(BaseModel):
+    MONTH: str
+    MAX_TEMP: float
+    MIN_TEMP: float
+    CROP: str
+    RAINFALL: float
+    pH: float
+    N: float
+    OC: float
+    P: float
+    Ca: float
+    Mg: float
+    K: float
+    Na: float
+    Zn: float
+    Cu: float
+    Mn: float
+    Fe: float
 
 @app.post("/predict")
-def predict_yield(data: PredictionInput):
-    try:
-        # Encode crop name to numeric
-        crop_encoded = encoder.transform([data.crop])[0]
-
-        # Build the input vector in correct order
-        input_features = np.array([[data.year, data.production, data.area, crop_encoded, data.mintemp, data.maxtemp, data.rainfall]])
-
-        # Make prediction
-        prediction = model.predict(input_features)[0]
-        return {"predicted_yield": round(prediction, 2)}
+def predict(features: Features):
+    # Convert to dict and enforce column order
+    input_dict = features.dict()
     
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    column_order = [
+        "MONTH", "MAX_TEMP", "MIN_TEMP", "CROP", "RAINFALL",
+        "pH", "N", "OC", "P", "Ca", "Mg", "K", "Na", "Zn", "Cu", "Mn", "Fe"
+    ]
+    
+    # Create DataFrame with correct column order
+    input_df = pd.DataFrame([[input_dict[col] for col in column_order]], columns=column_order)
+
+    # Make prediction
+    pred = model.predict(input_df)
+
+    return {"predicted_yield": float(pred[0])}
+
